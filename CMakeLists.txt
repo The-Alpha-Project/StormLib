@@ -346,7 +346,7 @@ endif()
 
 target_link_libraries(${LIBRARY_NAME} ${LINK_LIBS})
 add_library(${PROJECT_NAME}::${LIBRARY_NAME} ALIAS ${LIBRARY_NAME}) # Allow users to link StormLib::storm when using add_subdirectory
-target_compile_definitions(${LIBRARY_NAME} INTERFACE STORMLIB_NO_AUTO_LINK) #CMake will take care of the linking
+target_compile_definitions(${LIBRARY_NAME} INTERFACE __STORMLIB_NO_STATIC_LINK__) #CMake will take care of the linking
 target_include_directories(${LIBRARY_NAME} PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/src>)
 set_target_properties(${LIBRARY_NAME} PROPERTIES PUBLIC_HEADER "src/StormLib.h;src/StormPort.h")
 if(BUILD_SHARED_LIBS)
