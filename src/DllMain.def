@@ -18,6 +18,7 @@ EXPORTS
     SFileCloseArchive
 
     SFileAddListFile
+    SFileAddListFileEntries
 
     SFileSetCompactCallback
     SFileCompactArchive
