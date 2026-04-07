@@ -1,7 +1,7 @@
 /*****************************************************************************/
 /* huffman.h                              Copyright (c) Ladislav Zezula 2003 */
 /*---------------------------------------------------------------------------*/
-/* Description :                                                             */
+/* Adaptive Huffmann coding (FGK variant) for MPQ archives                  */
 /*---------------------------------------------------------------------------*/
 /*   Date    Ver   Who  Comment                                              */
 /* --------  ----  ---  -------                                              */
@@ -16,8 +16,19 @@
 //-----------------------------------------------------------------------------
 // Defines
 
-#define HUFF_ITEM_COUNT    0x203        // Number of items in the item pool
-#define LINK_ITEM_COUNT    0x80         // Maximum number of quick-link items
+#define DATA_TYPE_SPARSE        0x00
+#define DATA_TYPE_BINARY        0x01
+#define DATA_TYPE_TEXT          0x02
+#define DATA_TYPE_GENERAL       0x03
+#define DATA_TYPE_ADPCM_4       0x04
+#define DATA_TYPE_ADPCM_6       0x05
+#define DATA_TYPE_STEREO_3      0x06
+#define DATA_TYPE_STEREO_4      0x07
+#define DATA_TYPE_STEREO_5      0x08
+
+#define LINK_ITEM_COUNT         128        // Maximum number of quick-link items
+#define BYTE_ITEM_COUNT         258        // Number of items-by-byte
+#define HUFF_ITEM_COUNT         515        // Number of items in the item pool
 
 //-----------------------------------------------------------------------------
 // Structures and classes
@@ -33,10 +44,10 @@ class TInputStream
     bool Peek7Bits(unsigned int & Value);
     void SkipBits(unsigned int BitCount);
 
-    unsigned char * pbInBufferEnd;      // End position in the the input buffer
-    unsigned char * pbInBuffer;         // Current position in the the input buffer
+    unsigned char * pbInBufferEnd;      // End position in the input buffer
+    unsigned char * pbInBuffer;         // Current position in the input buffer
     unsigned int BitBuffer;             // Input bit buffer
-    unsigned int BitCount;              // Number of bits remaining in 'dwBitBuff'
+    unsigned int BitCount;              // Number of bits remaining in 'BitBuffer'
 };
 
 
@@ -76,10 +87,10 @@ struct THTreeItem
 
     THTreeItem  * pNext;                // Pointer to lower-weight tree item
     THTreeItem  * pPrev;                // Pointer to higher-weight item
-    unsigned int  DecompressedValue;    // 08 - Decompressed byte value (also index in the array)
-    unsigned int  Weight;               // 0C - Weight
-    THTreeItem  * pParent;              // 10 - Pointer to parent item (NULL if none)
-    THTreeItem  * pChildLo;             // 14 - Pointer to the child with lower-weight child ("left child")
+    unsigned int  DecompressedValue;    // Decompressed byte value (also index in the array)
+    unsigned int  Weight;               // Weight
+    THTreeItem  * pParent;              // Pointer to parent item (NULL if none)
+    THTreeItem  * pChildLo;             // Pointer to the lower-weight child ("left child")
 };
 
 
@@ -99,9 +110,9 @@ struct TQuickLink
 };
 
 
-// Structure for Huffman tree (Size 0x3674 bytes). Because I'm not expert
-// for the decompression, I do not know actually if the class is really a Hufmann
-// tree. If someone knows the decompression details, please let me know
+// Adaptive Huffmann tree (FGK variant). The tree is initialized with
+// pre-computed weight tables and rebalanced after every symbol to
+// maintain the sibling property
 class THuffmannTree
 {
     public:
@@ -116,7 +127,7 @@ class THuffmannTree
     THTreeItem * CreateNewItem(unsigned int DecompressedValue, unsigned int Weight, TInsertPoint InsertPoint);
 
     unsigned int FixupItemPosByWeight(THTreeItem * pItem, unsigned int MaxWeight);
-    bool  BuildTree(unsigned int CompressionType);
+    bool  BuildTree(unsigned int DataType);
 
     void  IncWeightsAndRebalance(THTreeItem * pItem);
     bool  InsertNewBranchAndRebalance(unsigned int Value1, unsigned int Value2);
@@ -124,7 +135,7 @@ class THuffmannTree
     void  EncodeOneByte(TOutputStream * os, THTreeItem * pItem);
     unsigned int DecodeOneByte(TInputStream * is);
 
-    unsigned int Compress(TOutputStream * os, void * pvInBuffer, int cbInBuffer, int nCmpType);
+    unsigned int Compress(TOutputStream * os, void * pvInBuffer, int cbInBuffer, int DataType);
     unsigned int Decompress(void * pvOutBuffer, unsigned int cbOutLength, TInputStream * is);
 
     THTreeItem   ItemBuffer[HUFF_ITEM_COUNT];   // Buffer for tree items. No memory allocation is needed
@@ -134,11 +145,11 @@ class THuffmannTree
     // ListHead.pNext = highest weight item, ListHead.pPrev = lowest weight item
     THTreeItem   ListHead;
 
-    THTreeItem * ItemsByByte[0x102];            // Array of item pointers, one for each possible byte value
+    THTreeItem * ItemsByByte[BYTE_ITEM_COUNT];  // Array of item pointers, one for each possible byte value
     TQuickLink   QuickLinks[LINK_ITEM_COUNT];   // Array of quick-link items
 
     unsigned int MinValidValue;                 // A minimum value of TQDecompress::ValidValue to be considered valid
-    unsigned int bIsCmp0;                       // 1 if compression type 0
+    bool bIsSparseData;                         // True if sparse data
 };
 
 #endif // __HUFFMAN_H__
