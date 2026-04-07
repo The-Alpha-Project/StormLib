@@ -1,4 +1,4 @@
-﻿/*****************************************************************************/
+/*****************************************************************************/
 /* StormTest.cpp                          Copyright (c) Ladislav Zezula 2003 */
 /*---------------------------------------------------------------------------*/
 /* Test module for StormLib                                                  */
@@ -37,7 +37,7 @@
 //------------------------------------------------------------------------------
 // Local structures
 
-#define ID_XHSC 0x58485343      // 'XHSC'
+#define ID_XHSC             0x58485343      // 'XHSC'
 
 // Artificial error code for situations where we don't know the result
 #define ERROR_UNDETERMINED_RESULT 0xC000FFFF
@@ -135,21 +135,26 @@ typedef struct _LINE_INFO
     const char * szLine;
 } LINE_INFO, *PLINE_INFO;
 
+#define ID_WAVE_MAGIC1      0x46464952      // 'RIFF'
+#define ID_WAVE_MAGIC2      0x45564157      // 'WAVE'
+#define ID_WAVE_CHUNK_FMT   0x20746d66      // 'fmt '
+#define ID_WAVE_CHUNK_DATA  0x61746164      // 'data'
+
 typedef struct _WAVE_FILE_HEADER
 {
-    DWORD dwRiffSignature;                  // 'RIFF'
+    DWORD dwRiffSignature;                  // ID_WAVE_MAGIC1 ('RIFF')
     DWORD dwFileSize;
-    DWORD dwTypeSignature;                  // 'WAVE'
-    DWORD dwChunkMarker;                    // 'fmt\0'
-    DWORD dwLength;                         // 16
+    DWORD dwTypeSignature;                  // ID_WAVE_MAGIC2 ('WAVE')
+    DWORD dwChunkMarker;                    // ID_WAVE_CHUNK_FMT ('fmt\0')
+    DWORD dwLength;                         // Length of the format chunk (16 bytes)
     USHORT wFormat;                         // 1 = PCM
     USHORT wChannels;                       // Number of channels
     DWORD dwSamplesPerSec;                  // Bitrate
     DWORD dwAvgSamplesPerSec;
     USHORT wBlockAlign;
     USHORT wBitsPerSample;
-    DWORD dwDataSignature;                  // 'data'
-    DWORD dwDataSize;                       // 'data'
+    DWORD dwDataSignature;                  // ID_WAVE_CHUNK_DATA ('data')
+    DWORD dwDataSize;                       // Size of the data chunk
 } WAVE_FILE_HEADER, *PWAVE_FILE_HEADER;
 
 //------------------------------------------------------------------------------
@@ -369,34 +374,44 @@ static void PlayWaveSound(PFILE_DATA pFileData)
 #endif    
 
 #ifdef STORMLIB_LINUX
-    PWAVE_FILE_HEADER pHeader = (PWAVE_FILE_HEADER)(pFileData->FileData);
+    PWAVE_FILE_HEADER pWaveHeader = (PWAVE_FILE_HEADER)pFileData->FileData;
     snd_pcm_hw_params_t *params;
     snd_pcm_t *pcm_handle;
-    unsigned int bitrate = pHeader->dwSamplesPerSec;
 
     // Suppress ALSA error printing
     snd_lib_error_set_handler(alsa_silent_error_handler);
 
-    // Open the default sound device and play the sound
-    if(snd_pcm_open(&pcm_handle, "default", SND_PCM_STREAM_PLAYBACK, 0) >= 0)
+    // Capture the WAVE file header
+    if(pFileData->dwFileSize >= sizeof(WAVE_FILE_HEADER) && pWaveHeader->dwRiffSignature == ID_WAVE_MAGIC1 && pWaveHeader->dwTypeSignature == ID_WAVE_MAGIC2)
     {
-        snd_pcm_format_t format = (pHeader->wBitsPerSample == 16) ? SND_PCM_FORMAT_S16_LE : SND_PCM_FORMAT_S8;
-        unsigned int divider = (pHeader->wBitsPerSample == 16) ? 4 : 2;
-        void * wave_buffer = &pFileData->FileData[sizeof(WAVE_FILE_HEADER)];
+        // Scan for "fmt " and "data"
+        if(pWaveHeader->dwChunkMarker == ID_WAVE_CHUNK_FMT && pWaveHeader->dwDataSignature == ID_WAVE_CHUNK_DATA)
+        {
+            if(pWaveHeader->wBlockAlign != 0)
+            {
+                // Open the default sound device and play the sound
+                if(snd_pcm_open(&pcm_handle, "default", SND_PCM_STREAM_PLAYBACK, 0) >= 0)
+                {
+                    snd_pcm_format_t format = (pWaveHeader->wBitsPerSample == 16) ? SND_PCM_FORMAT_S16_LE : SND_PCM_FORMAT_S8;
+                    unsigned int rate = pWaveHeader->dwSamplesPerSec;
 
-        snd_pcm_hw_params_alloca(&params);
-        snd_pcm_hw_params_any(pcm_handle, params);
-        snd_pcm_hw_params_set_access(pcm_handle, params, SND_PCM_ACCESS_RW_INTERLEAVED);
-        snd_pcm_hw_params_set_format(pcm_handle, params, format);
-        snd_pcm_hw_params_set_channels(pcm_handle, params, pHeader->wChannels);
-        snd_pcm_hw_params_set_rate_near(pcm_handle, params, &bitrate, 0);
-        snd_pcm_hw_params(pcm_handle, params);
+                    snd_pcm_hw_params_alloca(&params);
+                    snd_pcm_hw_params_any(pcm_handle, params);
+                    snd_pcm_hw_params_set_access(pcm_handle, params, SND_PCM_ACCESS_RW_INTERLEAVED);
+                    snd_pcm_hw_params_set_format(pcm_handle, params, format);
+                    snd_pcm_hw_params_set_channels(pcm_handle, params, pWaveHeader->wChannels);
+                    snd_pcm_hw_params_set_rate_near(pcm_handle, params, &rate, 0);
+                    snd_pcm_hw_params(pcm_handle, params);
 
-        snd_pcm_writei(pcm_handle, wave_buffer, pHeader->dwDataSize / divider);
-        snd_pcm_close(pcm_handle);
+                    snd_pcm_writei(pcm_handle, (pWaveHeader + 1), pWaveHeader->dwDataSize / pWaveHeader->wBlockAlign);
+                    snd_pcm_drain(pcm_handle);
+                    snd_pcm_close(pcm_handle);
+                }
+            }
+        }
     }
-#endif    
-}                    
+    #endif
+}
 
 static bool CompareBlocks(LPBYTE pbBlock1, LPBYTE pbBlock2, DWORD dwLength, DWORD * pdwDifference)
 {
